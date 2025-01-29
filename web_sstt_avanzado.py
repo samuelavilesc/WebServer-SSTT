@@ -15,6 +15,9 @@ import logging      # Para imprimir logs
 
 
 RE_HTTP=re.compile(r"HTTP\/1\.1")
+RE_URL_PARAMETERS=re.compile(r"\?.* ")
+RE_RECURSO=re.compile(r"GET \/.* ")
+RE_HEADERS=re.compile(r"\\r\\n.*\\r\\n\\r\\n")
 BUFSIZE = 8192 # Tamaño máximo del buffer que se puede utilizar
 TIMEOUT_CONNECTION = 20 # Timout para la conexión persistente
 MAX_ACCESOS = 10
@@ -29,6 +32,8 @@ logging.basicConfig(level=logging.INFO,
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger()
 
+headers_map={}
+actual_cookie=0
 
 def enviar_mensaje(cs, data):
     """ Esta función envía datos (data) a través del socket cs
@@ -59,8 +64,42 @@ def process_cookies(headers,  cs):
         5. Si se encuentra y tiene un valor 1 <= x < MAX_ACCESOS se incrementa en 1 y se devuelve el valor
     """
     pass
+def send_file(cs,file,size):
+    file_open=open(file,"rb")
+    data=file_open.read(BUFSIZE)
+    sended=0
+    while sended<size:
+
+        sended+=cs.send(data)
+        data=file_open.read(BUFSIZE)
+
+    file_open.close()
 
 
+def send_response(msg,cs):
+    global actual_cookie
+    isOK=False
+    if msg=="405":
+        resp="405 Method Not Allowed\r\n"
+        file="405.html"
+    elif msg=="505":
+
+        resp="505 HTTP Version Not Supported\r\n"
+        file="505.html"
+    else:
+        isOK=True
+        resp="200 OK\r\n"
+        file=str(msg)
+    
+    size=os.stat(file).st_size
+    
+    if isOK:
+        file_type = filetypes[msg[1:].split(".")[1]]
+        resp="HTTP/1.1 "+resp+"Conte/nt-Type:"+file_type+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+"Server: foropatinetes_8656.org\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max=5\r\n"+"Set-cookie: cookie_counter="+str(actual_cookie)+" ;Max-Age=25"+"\r\n"+"\r\n"
+    else:
+        resp="HTTP/1.1 "+resp+"Content-Type:"+" text/html"+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max=5\r\n"+"\r\n"
+    enviar_mensaje(cs,resp.encode())
+    send_file(cs,file,size)
 def process_web_request(cs, webroot):
 
     while True:
@@ -69,9 +108,48 @@ def process_web_request(cs, webroot):
         #comprobar si hay que cerrar la conexion por timeout
         if rsublist:
             msg = recibir_mensaje(cs)
-            if not re.findall(RE_HTTP,msg):
-                ##error no está bien formateada según HTTP 1.1
-                print("mal")
+            if not re.findall(RE_HTTP,msg): # sino encuentra http 1.1 error
+                ##error no está bien formateada según HTTP 1.1 devolvemos 505
+                send_response("505", cs)
+                continue
+            elif re.match(RE_POST, msg): #si es post lo procesamos
+                process_post_request(cs,msg)
+                continue
+            elif not re.findall(RE_GET,msg) :# si no encontramos get error
+                send_file("405",cs)
+                continue
+            if re.findall(RE_URL_PARAMETERS,msg):
+                msg=re.sub(RE_URL_PARAMETERS," ",msg)
+            recurso = re.findall(RE_RECURSO, msg)
+            if recurso:
+                recurso = recurso[0].replace("GET", "").replace(" ", "").replace("HTTP", "")
+                # Si el recurso es la raíz, asignamos "index.html"
+                recurso = webroot + ("index.html" if recurso == "/" else recurso.lstrip("/"))
+            headers=re.findall(RE_HEADERS,repr(msg))
+            if not os.path.isfile(recurso):
+                    send_file("404",cs)
+            elif headers:
+                headers_map=process_headers(headers[0],cs)
+                ret_cookies=process_cookies(headers[0],cs)
+                        
+                if ret_cookies==MAX_ACCESOS: # desconectar del servidor + send error
+                    send_file("403", cs)
+                    logging.info("LImite de accesos")
+
+                        
+                        
+                    return 
+
+                    else:#TODO añadir set cookies del valor
+
+                        actual_cookie=ret_cookies+1
+                        size=os.stat(recurso).st_size
+                        file_type=os.path.basename(recurso).split(".")[1]
+                                        
+                        send_file(recurso, cs)
+                
+
+
         else:
             #timeout alcanzado
             msg="Error: timeout alcanzado\n"
