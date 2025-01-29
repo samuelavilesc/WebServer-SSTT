@@ -18,6 +18,12 @@ RE_HTTP=re.compile(r"HTTP\/1\.1")
 RE_URL_PARAMETERS=re.compile(r"\?.* ")
 RE_RECURSO=re.compile(r"GET \/.* ")
 RE_HEADERS=re.compile(r"\\r\\n.*\\r\\n\\r\\n")
+RE_GET=re.compile(r"^GET")
+RE_POST=re.compile(r"^POST")
+
+RE_COOKIE=re.compile(r"Cookie: [A-Za-z_0-9]+=[0-9]+")
+RE_COOKIE_COUNTER=re.compile(r"Cookie: cookie_counter=[0-9]+",2)
+
 BUFSIZE = 8192 # Tamaño máximo del buffer que se puede utilizar
 TIMEOUT_CONNECTION = 20 # Timout para la conexión persistente
 MAX_ACCESOS = 10
@@ -54,7 +60,29 @@ def cerrar_conexion(cs):
     """
     cs.close()
 
+def process_headers(headers,cs):
 
+    #* splitear por \r\n
+    #* para todos mostrar lo que haya dsp de :
+
+    headers_map= {}
+
+    headers=headers.split("\\r\\n")
+
+    for header in headers:
+
+        if(header!=""):
+            
+            header=header.split(":")
+            
+            index=header[0].replace(" ","")
+
+            value=header[1].replace(" ","")
+
+            headers_map[index]=value
+
+    return headers_map
+    
 def process_cookies(headers,  cs):
     """ Esta función procesa la cookie cookie_counter
         1. Se analizan las cabeceras en headers para buscar la cabecera Cookie
@@ -63,7 +91,30 @@ def process_cookies(headers,  cs):
         4. Si se encuentra y tiene el valor MAX_ACCESSOS se devuelve MAX_ACCESOS
         5. Si se encuentra y tiene un valor 1 <= x < MAX_ACCESOS se incrementa en 1 y se devuelve el valor
     """
-    pass
+    cookie=re.findall(RE_COOKIE,repr(headers))
+    if cookie:
+        cookie = cookie[0]
+        cookie_counter=re.findall(RE_COOKIE_COUNTER,repr(cookie))
+        if cookie_counter:
+
+            cookie_counter=cookie_counter[0] #selecciona la coincidencia de la lista que devuelve findall
+
+            counter=cookie_counter.replace(" ","") #eliminamos espacios si hubiera
+            counter=counter.split("=") 
+            counter=int(counter[1]) #seleccionamos el numero del cookie_counter
+
+            if counter==MAX_ACCESOS:
+                return MAX_ACCESOS
+
+            elif counter<MAX_ACCESOS and counter>=1:
+                counter+=1 # se incrementa en 1 como se pide
+                return counter
+        
+        else:
+            return 1
+    else:
+        return 0 #*NUEVOS , SI NO HAY COOKIES DEVOLVEMOS 0
+
 def send_file(cs,file,size):
     file_open=open(file,"rb")
     data=file_open.read(BUFSIZE)
@@ -86,6 +137,18 @@ def send_response(msg,cs):
 
         resp="505 HTTP Version Not Supported\r\n"
         file="505.html"
+    elif msg=="400":
+
+        resp=" 400 Bad Request\r\n"
+        file="400.html"
+     elif msg=="403":
+
+        resp="403 Forbidden\r\n"
+        file="403.html"
+    elif msg=="404":
+
+        resp="404 Not Found\r\n"
+        file="404.html"
     else:
         isOK=True
         resp="200 OK\r\n"
@@ -113,10 +176,11 @@ def process_web_request(cs, webroot):
                 send_response("505", cs)
                 continue
             elif re.match(RE_POST, msg): #si es post lo procesamos
-                process_post_request(cs,msg)
+                #procesado de post 
+                print("Mensaje post:" + msg)
                 continue
             elif not re.findall(RE_GET,msg) :# si no encontramos get error
-                send_file("405",cs)
+                send_response("405",cs)
                 continue
             if re.findall(RE_URL_PARAMETERS,msg):
                 msg=re.sub(RE_URL_PARAMETERS," ",msg)
@@ -127,33 +191,30 @@ def process_web_request(cs, webroot):
                 recurso = webroot + ("index.html" if recurso == "/" else recurso.lstrip("/"))
             headers=re.findall(RE_HEADERS,repr(msg))
             if not os.path.isfile(recurso):
-                    send_file("404",cs)
+                    send_response("404",cs)
             elif headers:
                 headers_map=process_headers(headers[0],cs)
                 ret_cookies=process_cookies(headers[0],cs)
                         
                 if ret_cookies==MAX_ACCESOS: # desconectar del servidor + send error
-                    send_file("403", cs)
-                    logging.info("LImite de accesos")
-
-                        
-                        
+                    send_response("403", cs)
                     return 
 
-                    else:#TODO añadir set cookies del valor
-
-                        actual_cookie=ret_cookies+1
-                        size=os.stat(recurso).st_size
-                        file_type=os.path.basename(recurso).split(".")[1]
-                                        
-                        send_file(recurso, cs)
+                else:
+                    actual_cookie=ret_cookies+1
+                    size=os.stat(recurso).st_size
+                    file_type=os.path.basename(recurso).split(".")[1]                                        
+                    send_file(recurso, cs)
                 
-
+            else:
+                send_response("400",cs)
 
         else:
             #timeout alcanzado
             msg="Error: timeout alcanzado\n"
-            enviar_mensaje(cs,msg)
+            enviar_mensaje(cs,msg.encode())
+            cerrar_conexion(cs)
+            return
 
     """ Procesamiento principal de los mensajes recibidos.
         Típicamente se seguirá un procedimiento similar al siguiente (aunque el alumno puede modificarlo si lo desea)
