@@ -31,6 +31,9 @@ MAX_ACCESOS = 10
 BACK_LOG = 64
 MAX_KEEP_ALIVE_COUNTER=5
 
+
+EMAIL_CORRECTO="pepito%40mundohuevo3840.org" #%40=@
+
 # Extensiones admitidas (extension, name in HTTP)
 filetypes = {"gif":"image/gif", "jpg":"image/jpg", "jpeg":"image/jpeg", "png":"image/png", "htm":"text/htm", 
              "html":"text/html", "css":"text/css", "js":"text/js"}
@@ -148,6 +151,12 @@ def send_response(msg,cs):
 
         resp="404 Not Found\r\n"
         file="404.html"
+    elif msg=="200":
+        resp="200 OK\r\n"
+        file="200.html"
+    elif msg =="401":
+        resp="401 Unauthorized\r\n"
+        file="401.html"
     else:
         isOK=True
         resp="200 OK\r\n"
@@ -163,6 +172,39 @@ def send_response(msg,cs):
         resp="HTTP/1.1 "+resp+"Content-Type:"+" text/html"+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max=5\r\n"+"\r\n"
     enviar_mensaje(cs,resp.encode())
     send_file(cs,file,size)
+
+
+def process_post_request(cs,msg):
+
+    # logging.info(repr(msg))
+
+    # \\r\\n\\r\\nemail=usuario1%40mARTket.org'
+    
+    email=re.findall(RE_POST_BODY,repr(msg))
+
+
+    if email:
+        email=email[0].strip()
+        email=email.replace("'","")
+        email=email.replace("\\r\\n","")
+        email=email.replace("email=","")
+        logging.info(email)
+
+        
+        if email==EMAIL_CORRECTO:
+
+            send_response("200", cs)
+
+        else:
+
+            send_response("401", cs)
+        
+    else:
+
+        send_response("401", cs)
+        
+
+
 
 def process_web_request(cs, webroot):
     global headers_map
@@ -185,7 +227,7 @@ def process_web_request(cs, webroot):
                 continue
             elif re.match(RE_POST, msg): #si es post lo procesamos
                 #procesado de post 
-                print("Mensaje post:" + msg)
+                process_post_request(cs,msg)
                 continue
             elif not re.findall(RE_GET,msg) :# si no encontramos get error
                 send_response("405",cs)
