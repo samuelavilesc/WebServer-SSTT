@@ -20,14 +20,17 @@ RE_RECURSO=re.compile(r"GET \/.* ")
 RE_HEADERS=re.compile(r"\\r\\n.*\\r\\n\\r\\n")
 RE_GET=re.compile(r"^GET")
 RE_POST=re.compile(r"^POST")
+RE_POST_BODY=re.compile(r"\\r\\n\\r\\n.*")
 
 RE_COOKIE=re.compile(r"Cookie: [A-Za-z_0-9]+=[0-9]+")
-RE_COOKIE_COUNTER=re.compile(r"Cookie: cookie_counter=[0-9]+",2)
+RE_COOKIE_COUNTER=re.compile(r"Cookie: cookie_counter_[0-9]+=[0-9]+",2)
 
 BUFSIZE = 8192 # Tamaño máximo del buffer que se puede utilizar
 TIMEOUT_CONNECTION = 20 # Timout para la conexión persistente
 MAX_ACCESOS = 10
 BACK_LOG = 64
+MAX_KEEP_ALIVE_COUNTER=5
+
 # Extensiones admitidas (extension, name in HTTP)
 filetypes = {"gif":"image/gif", "jpg":"image/jpg", "jpeg":"image/jpeg", "png":"image/png", "htm":"text/htm", 
              "html":"text/html", "css":"text/css", "js":"text/js"}
@@ -60,7 +63,7 @@ def cerrar_conexion(cs):
     """
     cs.close()
 
-def process_headers(headers,cs):
+def process_headers(headers):
 
     #* splitear por \r\n
     #* para todos mostrar lo que haya dsp de :
@@ -83,7 +86,7 @@ def process_headers(headers,cs):
 
     return headers_map
     
-def process_cookies(headers,  cs):
+def process_cookies(headers):
     """ Esta función procesa la cookie cookie_counter
         1. Se analizan las cabeceras en headers para buscar la cabecera Cookie
         2. Una vez encontrada una cabecera Cookie se comprueba si el valor es cookie_counter
@@ -95,18 +98,17 @@ def process_cookies(headers,  cs):
     if cookie:
         cookie = cookie[0]
         cookie_counter=re.findall(RE_COOKIE_COUNTER,repr(cookie))
+        
         if cookie_counter:
 
             cookie_counter=cookie_counter[0] #selecciona la coincidencia de la lista que devuelve findall
-
             counter=cookie_counter.replace(" ","") #eliminamos espacios si hubiera
             counter=counter.split("=") 
             counter=int(counter[1]) #seleccionamos el numero del cookie_counter
-
             if counter==MAX_ACCESOS:
                 return MAX_ACCESOS
 
-            elif counter<MAX_ACCESOS and counter>=1:
+            elif counter<MAX_ACCESOS and counter>=0:
                 counter+=1 # se incrementa en 1 como se pide
                 return counter
         
@@ -134,15 +136,12 @@ def send_response(msg,cs):
         resp="405 Method Not Allowed\r\n"
         file="405.html"
     elif msg=="505":
-
         resp="505 HTTP Version Not Supported\r\n"
         file="505.html"
     elif msg=="400":
-
         resp=" 400 Bad Request\r\n"
         file="400.html"
-     elif msg=="403":
-
+    elif msg=="403":
         resp="403 Forbidden\r\n"
         file="403.html"
     elif msg=="404":
@@ -158,19 +157,28 @@ def send_response(msg,cs):
     
     if isOK:
         file_type = filetypes[msg[1:].split(".")[1]]
-        resp="HTTP/1.1 "+resp+"Conte/nt-Type:"+file_type+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+"Server: foropatinetes_8656.org\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max=5\r\n"+"Set-cookie: cookie_counter="+str(actual_cookie)+" ;Max-Age=25"+"\r\n"+"\r\n"
+        logging.info(file_type)
+        resp="HTTP/1.1 "+resp+"Conte/nt-Type:"+file_type+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+"Server: mundohuevo3840.org\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max=5\r\n"+"Set-cookie: cookie_counter_3840="+str(actual_cookie)+" ;Max-Age=25"+"\r\n"+"\r\n"
     else:
         resp="HTTP/1.1 "+resp+"Content-Type:"+" text/html"+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max=5\r\n"+"\r\n"
     enviar_mensaje(cs,resp.encode())
     send_file(cs,file,size)
-def process_web_request(cs, webroot):
 
+def process_web_request(cs, webroot):
+    global headers_map
+    global actual_cookie
+    keep_alive_counter=0
     while True:
         #recibir datos con select
         rsublist, wsublist, xsublist=select.select([cs],[], [],TIMEOUT_CONNECTION)
         #comprobar si hay que cerrar la conexion por timeout
         if rsublist:
+            keep_alive_counter+=1
             msg = recibir_mensaje(cs)
+
+            if keep_alive_counter >= MAX_KEEP_ALIVE_COUNTER:
+                logging.info("keep alive sobrepasado")
+                return
             if not re.findall(RE_HTTP,msg): # sino encuentra http 1.1 error
                 ##error no está bien formateada según HTTP 1.1 devolvemos 505
                 send_response("505", cs)
@@ -193,18 +201,19 @@ def process_web_request(cs, webroot):
             if not os.path.isfile(recurso):
                     send_response("404",cs)
             elif headers:
-                headers_map=process_headers(headers[0],cs)
-                ret_cookies=process_cookies(headers[0],cs)
+                headers_map=process_headers(headers[0])
+                ret_cookies=process_cookies(headers[0])
                         
                 if ret_cookies==MAX_ACCESOS: # desconectar del servidor + send error
+                    logging.info("Limite de accesos")
                     send_response("403", cs)
                     return 
 
                 else:
-                    actual_cookie=ret_cookies+1
-                    size=os.stat(recurso).st_size
-                    file_type=os.path.basename(recurso).split(".")[1]                                        
-                    send_file(recurso, cs)
+                    actual_cookie=ret_cookies
+                    logging.info("Actual cookie: " + str(actual_cookie))
+                    logging.info("Enviando recurso: "+recurso)            
+                    send_response(recurso,cs)
                 
             else:
                 send_response("400",cs)
