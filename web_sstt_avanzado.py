@@ -26,10 +26,10 @@ RE_COOKIE=re.compile(r"Cookie: [A-Za-z_0-9]+=[0-9]+")
 RE_COOKIE_COUNTER=re.compile(r"Cookie: cookie_counter_[0-9]+=[0-9]+",2)
 
 BUFSIZE = 8192 # Tamaño máximo del buffer que se puede utilizar
-TIMEOUT_CONNECTION = 20 # Timout para la conexión persistente
+TIMEOUT_CONNECTION = 20 # Timeout para la conexión persistente
 MAX_ACCESOS = 10
 BACK_LOG = 64
-MAX_KEEP_ALIVE_COUNTER=5
+MAX_KEEP_ALIVE_COUNTER=25 # 3+8+4+0+10=25
 
 
 EMAIL_CORRECTO="pepito%40mundohuevo3840.org" #%40=@
@@ -167,18 +167,20 @@ def send_response(msg,cs):
     if isOK:
         file_type = filetypes[msg[1:].split(".")[1]]
         logging.info(file_type)
-        resp="HTTP/1.1 "+resp+"Conte/nt-Type:"+file_type+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+"Server: mundohuevo3840.org\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max=5\r\n"+"Set-cookie: cookie_counter_3840="+str(actual_cookie)+" ;Max-Age=25"+"\r\n"+"\r\n"
+        if "index.html" in msg:
+            logging.info("Actual cookie: " + str(actual_cookie))
+            resp="HTTP/1.1 "+resp+"Content-Type:"+file_type+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+"Server: mundohuevo3840.org\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max="+str(MAX_KEEP_ALIVE_COUNTER)+"\r\n"+"Set-cookie: cookie_counter_3840="+str(actual_cookie)+";Max-Age=120"+"\r\n"+"\r\n"
+        else:
+            #solo mandamos la cookie si es para el index como dice el enunciado
+            resp="HTTP/1.1 "+resp+"Content-Type:"+file_type+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+"Server: mundohuevo3840.org\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max="+str(MAX_KEEP_ALIVE_COUNTER)+"\r\n"+"\r\n"
     else:
-        resp="HTTP/1.1 "+resp+"Content-Type:"+" text/html"+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max=5\r\n"+"\r\n"
+        resp="HTTP/1.1 "+resp+"Content-Type:"+" text/html"+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max="+str(MAX_KEEP_ALIVE_COUNTER)+"\r\n"+"\r\n"
     enviar_mensaje(cs,resp.encode())
     send_file(cs,file,size)
 
 
 def process_post_request(cs,msg):
 
-    # logging.info(repr(msg))
-
-    # \\r\\n\\r\\nemail=usuario1%40mARTket.org'
     
     email=re.findall(RE_POST_BODY,repr(msg))
 
@@ -239,30 +241,29 @@ def process_web_request(cs, webroot):
                 recurso = recurso[0].replace("GET", "").replace(" ", "").replace("HTTP", "")
                 # Si el recurso es la raíz, asignamos "index.html"
                 recurso = webroot + ("index.html" if recurso == "/" else recurso.lstrip("/"))
-            headers=re.findall(RE_HEADERS,repr(msg))
-            if not os.path.isfile(recurso):
+                headers=re.findall(RE_HEADERS,repr(msg))
+                if not os.path.isfile(recurso):
                     send_response("404",cs)
-            elif headers:
-                headers_map=process_headers(headers[0])
-                ret_cookies=process_cookies(headers[0])
-                        
-                if ret_cookies==MAX_ACCESOS: # desconectar del servidor + send error
-                    logging.info("Limite de accesos")
-                    send_response("403", cs)
-                    return 
+                elif headers:
+                    headers_map=process_headers(headers[0])
+                    ret_cookies=process_cookies(headers[0])       
+                    if ret_cookies==MAX_ACCESOS: # desconectar del servidor + send error
+                        logging.info("Limite de accesos")
+                        send_response("403", cs)
+                        return 
 
-                else:
-                    actual_cookie=ret_cookies
-                    logging.info("Actual cookie: " + str(actual_cookie))
-                    logging.info("Enviando recurso: "+recurso)            
-                    send_response(recurso,cs)
+                    else:
+                        actual_cookie=ret_cookies
+                        logging.info("Enviando recurso: "+recurso)            
+                        send_response(recurso,cs)
                 
             else:
                 send_response("400",cs)
 
         else:
             #timeout alcanzado
-            msg="Error: timeout alcanzado\n"
+            logging.info("Timeout alcanzado")
+            msg="HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n"
             enviar_mensaje(cs,msg.encode())
             cerrar_conexion(cs)
             return
