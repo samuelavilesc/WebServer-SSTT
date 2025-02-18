@@ -174,7 +174,7 @@ def send_response(msg,cs):
             #solo mandamos la cookie si es para el index como dice el enunciado
             resp="HTTP/1.1 "+resp+"Content-Type:"+file_type+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+"Server: mundohuevo3840.org\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max="+str(MAX_KEEP_ALIVE_COUNTER)+"\r\n"+"\r\n"
     else:
-        resp="HTTP/1.1 "+resp+"Content-Type:"+" text/html"+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n"+ "Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max="+str(MAX_KEEP_ALIVE_COUNTER)+"\r\n"+"\r\n"
+        resp="HTTP/1.1 "+resp+"Content-Type:"+" text/html"+"\r\n"+"Content-Length: "+str(size)+"\r\n"+"Date:"+datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')+"\r\n" +"Server: mundohuevo3840.org\r\n"+"Connection: Keep-Alive\r\n"+"Keep-Alive: timeout="+str(TIMEOUT_CONNECTION)+ ", max="+str(MAX_KEEP_ALIVE_COUNTER)+"\r\n"+"\r\n"
     enviar_mensaje(cs,resp.encode())
     send_file(cs,file,size)
 
